@@ -1,58 +1,38 @@
 ═══════════════════════════════════════════════════════
-  PINTEREST PIN STUDIO v2 — VERCEL UPDATE
+  PINTEREST PIN STUDIO — UPDATE (v2.1)
 ═══════════════════════════════════════════════════════
+Built & verified: npm run build → Compiled successfully (0 errors)
 
-This zip codth "npm run build" → Compiled successfully (0 errors).
-
-FOLDER STRUCTURE (must match exactly):
-  pin-studio/
-    package.json        <- has "jszip" (REQUIRED for ZIP download)
-    public/index.html   <- loads all Google Fonts
-    src/App.jsx         <- the full v2 app, all features
-    src/index.js
-    .gitignore
-
-───────────────────────────────────────────────────────
- HOW TO MAKE IT GO LIVE (GitHub Desktop)
-───────────────────────────────────────────────────────
-1. Copy these files INTO your local pinmaker repo folder,
-   overwriting the old ones (Replace when asked):
-       package.json
-       public/index.html
-       src/App.jsx
-       src/index.js
-
-2. Open GitHub Desktop. You MUST see changed files listed.
-   - If it shows NOTHING changed, the files went to the wrong
-     folder. Find the folder that GitHub Desktop is tracking
-     (Repository menu > Show in Finder) and copy into THAT one.
-
-3. Write a summary ("v2 update") and click "Commit to main".
-
-4. Click "Push origin" at the top. (This sends it to GitHub.)
-
-5. Vercel rebuilds automatically (~2 min).
-
-6. HARD REFRESH the live page: Cmd + Shift + R
-   (browsers cache the old app aggressively)
+WHAT'S FIXED IN THIS UPDATE
+1. TEMPLATES no longer change every pin.
+   - In CSV/Sitemap, click a pin card to select it, then in the
+     orange panel click "Lock current template into this pin only".
+   - Pick a Ready Template first, then lock it onto that one pin.
+     Other pins are untouched.
+2. BANNER TRANSPARENCY.
+   - New "Banner opacity" slider (sidebar > Banner Size).
+   - Lower it so the photos show through the banner — no blank gap.
+   - Text automatically gets a shadow so it stays readable.
+3. SITEMAP SCRAPER — more reliable.
+   - Now tries 5 proxies including the allorigins JSON endpoint.
+   - Already pulls title + OG image + URL from each page.
+4. PINTEREST SCHEDULING CSV.
+   - New blue "Pinterest CSV" button next to "Download all (ZIP)".
+   - The ZIP also now contains pinterest-schedule.csv automatically.
+   - Columns: Title, Media URL (matches image filenames), Board,
+     Description, Link, Publish date, Keywords.
+5. TEXT NEVER OVERFLOWS THE BANNER.
+   - Headline auto-shrinks to fit inside the banner height.
 
 ───────────────────────────────────────────────────────
- HOW TO CONFIRM THE NEW VERSION IS LIVE
+DEPLOY (your repo: plizyhost/hallopins, command line)
 ───────────────────────────────────────────────────────
-The NEW version shows, on the Single Pin tab:
-  - A color box you can CLICK to open a big palette (50+ colors)
-  - Image "Position & Zoom" sliders after you pick a photo
-On the CSV Batch tab:
-  - A dark-green "Download all (ZIP)" button
-  - Click any pin card -> orange "This pin's custom style" panel
-In the template sidebar:
-  - "Ready Templates" with 8 preset buttons
-  - A "Save" box to name your own template
+cd /Users/mac/Downloads/hallopins
+# copy these over the old files (keep folder layout):
+#   package.json, public/index.html, src/App.jsx, src/index.js
+git add .
+git commit -m "v2.1: transparency, per-pin lock, pinterest csv, autofit"
+git push
 
-If you DON'T see these after deploy, the old file is still in
-GitHub. Open github.com/plizyhost/pinmaker/blob/main/src/App.jsx
-- line 1 must say:  import React, { useState, useEffect, useRef } from 'react';
-- line 2 must say:  import JSZip from 'jszip';
-If line 2 is missing, the upload didn't replace the old file.
-
+Then Vercel auto-redeploys. HARD REFRESH the page: Cmd + Shift + R
 ═══════════════════════════════════════════════════════

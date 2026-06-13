@@ -54,11 +54,18 @@ const PALETTE = {
   "Neutrals": ["#FFFFFF","#F1EFE8","#D3D1C7","#888780","#5F5E5A","#444441","#2C2C2A","#1A1A1A","#000000"],
 };
 
+function hexToRgba(hex,alpha){
+  if(!hex||hex.length<7) return `rgba(0,0,0,${alpha})`;
+  const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
 function renderPin(cv, tmpl, pin, imgCache) {
   const ctx = cv.getContext("2d");
   const {layout,fontStack,fontWeight,fontStyle,uppercase,fontScale,bannerH,bannerW,bannerR,bannerPad,colors} = tmpl;
+  const bandOpacity = tmpl.bandOpacity===undefined?100:tmpl.bandOpacity;
   const {title="",subtitle="",label="",url="",topImg,botImg,topPos,botPos} = pin;
-  const tfs = Math.round(108*fontScale/100);
+  const tfsMax = Math.round(108*fontScale/100);
   const sfs = Math.round(40*fontScale/100);
   const lfs = Math.round(38*fontScale/100);
   const mainTxt = uppercase ? (title||"").toUpperCase() : (title||"");
@@ -67,7 +74,7 @@ function renderPin(cv, tmpl, pin, imgCache) {
 
   const lum = hex => { if(!hex||hex.length<7) return 128; const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16); return(r*299+g*587+b*114)/1000; };
   const lblTxt = bg => lum(bg)>128?"#1A1A1A":"#FFFFFF";
-  const subClr = bg => colors.subtitle || (lum(bg)>128?"#666":"rgba(255,255,255,.75)");
+  const subClr = bg => colors.subtitle || (lum(bg)>128?"#666":"rgba(255,255,255,.85)");
 
   function drawImg(img,x,y,w,h,pos){
     if(!img){ctx.fillStyle="#E8E0D5";ctx.fillRect(x,y,w,h);ctx.fillStyle="#B0A898";ctx.font="500 28px 'Poppins',sans-serif";ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText("No image",x+w/2,y+h/2);return;}
@@ -78,11 +85,12 @@ function renderPin(cv, tmpl, pin, imgCache) {
     const oy=y-(sh-h)*(pos.y/100);
     ctx.drawImage(img,ox,oy,sw,sh);
   }
-  function wrap(text,maxW,maxLines){
+  function wrap(text,maxW,fsize){
+    ctx.font=`${fontStyle} ${fontWeight} ${fsize}px ${fontStack}`;
     const words=text.split(" ");let line="";const lines=[];
     for(const w of words){const t=line?line+" "+w:w;if(ctx.measureText(t).width>maxW&&line){lines.push(line);line=w;}else line=t;}
     if(line)lines.push(line);
-    return maxLines?lines.slice(0,maxLines):lines;
+    return lines;
   }
   function drawLabel(text,cx,y){
     if(!text)return 0;
@@ -92,27 +100,42 @@ function renderPin(cv, tmpl, pin, imgCache) {
     ctx.fillStyle=lblTxt(colors.label);ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText(text,cx,y+ph/2);
     return ph+20;
   }
-  function measureBlock(bw){
-    let h=0;
-    if(label) h+=lfs+32+20;
-    ctx.font=`${fontStyle} ${fontWeight} ${tfs}px ${fontStack}`;
-    const lines=wrap(mainTxt,bw-80,5);
-    h+=lines.length*tfs*1.18;
-    if(subtitle) h+=6+sfs*1.1;
-    return {h,lines};
+  // AUTO-FIT: shrink headline font until the whole text block fits inside the banner height
+  function fitText(bw){
+    const innerW=bw-80;
+    const labelH = label ? lfs+32+20 : 0;
+    const subH = subtitle ? 6+sfs*1.15 : 0;
+    const avail = bannerH - bannerPad*2 - labelH - subH;
+    let fs=tfsMax;
+    let lines=wrap(mainTxt,innerW,fs);
+    // shrink until lines fit both width (already wrapped) and total height fits
+    while(fs>22){
+      lines=wrap(mainTxt,innerW,fs);
+      const blockH=lines.length*fs*1.18;
+      if(blockH<=avail) break;
+      fs-=2;
+    }
+    const totalH = labelH + lines.length*fs*1.18 + subH;
+    return {fs,lines,totalH};
   }
-  function drawBanner(cx,cy){
+  function drawBanner(cx,cy,transparent){
     const bw=Math.round(PW*bannerW/100),bx=cx-bw/2,r=bannerW<100?bannerR:0;
     ctx.save();
-    ctx.fillStyle=colors.band;
-    ctx.beginPath();ctx.roundRect(bx,cy,bw,bannerH,r);ctx.fill();
+    // background fill — supports opacity so photos can show through
+    if(bandOpacity>0){
+      ctx.fillStyle = bandOpacity>=100 ? colors.band : hexToRgba(colors.band, bandOpacity/100);
+      ctx.beginPath();ctx.roundRect(bx,cy,bw,bannerH,r);ctx.fill();
+    }
     ctx.beginPath();ctx.roundRect(bx,cy,bw,bannerH,r);ctx.clip();
-    const {h:blockH,lines}=measureBlock(bw);
-    let ty=cy+Math.max(bannerPad,(bannerH-blockH)/2);
+    const {fs,lines,totalH}=fitText(bw);
+    let ty=cy+Math.max(bannerPad,(bannerH-totalH)/2);
     ty+=drawLabel(label,cx,ty);
-    ctx.font=`${fontStyle} ${fontWeight} ${tfs}px ${fontStack}`;ctx.fillStyle=colors.title;ctx.textAlign="center";ctx.textBaseline="top";
-    lines.forEach(l=>{ctx.fillText(l,cx,ty);ty+=tfs*1.18;});
+    ctx.font=`${fontStyle} ${fontWeight} ${fs}px ${fontStack}`;ctx.fillStyle=colors.title;ctx.textAlign="center";ctx.textBaseline="top";
+    // text shadow when banner is see-through so text stays readable over photos
+    if(bandOpacity<60){ctx.shadowColor="rgba(0,0,0,.55)";ctx.shadowBlur=12;}
+    lines.forEach(l=>{ctx.fillText(l,cx,ty);ty+=fs*1.18;});
     if(subtitle){ty+=6;ctx.font=`400 normal ${sfs}px 'Poppins',sans-serif`;ctx.fillStyle=subClr(colors.band);ctx.fillText(subtitle,cx,ty);}
+    ctx.shadowBlur=0;
     ctx.restore();
   }
   function drawUrl(y,isOverlay){
@@ -127,22 +150,40 @@ function renderPin(cv, tmpl, pin, imgCache) {
   const ti=topImg?imgCache[topImg]:null, bi=botImg?imgCache[botImg]:null;
 
   if(layout==="two"){
-    const rem=PH-bannerH-80,tph=Math.round(rem/2);
-    ctx.save();ctx.beginPath();ctx.rect(0,0,PW,tph);ctx.clip();drawImg(ti,0,0,PW,tph,tp);ctx.restore();
-    ctx.save();ctx.beginPath();ctx.rect(0,tph+bannerH,PW,rem-tph);ctx.clip();drawImg(bi,0,tph+bannerH,PW,rem-tph,bp);ctx.restore();
-    drawBanner(PW/2,tph);drawUrl(PH-80,false);
+    // when banner is transparent, let the photos run full-height behind it so there's no blank gap
+    if(bandOpacity<100){
+      const half=Math.round(PH/2);
+      ctx.save();ctx.beginPath();ctx.rect(0,0,PW,half);ctx.clip();drawImg(ti,0,0,PW,half,tp);ctx.restore();
+      ctx.save();ctx.beginPath();ctx.rect(0,half,PW,PH-half);ctx.clip();drawImg(bi,0,half,PW,PH-half,bp);ctx.restore();
+      drawBanner(PW/2,Math.round((PH-bannerH)/2),true);drawUrl(PH-80,true);
+    } else {
+      const rem=PH-bannerH-80,tph=Math.round(rem/2);
+      ctx.save();ctx.beginPath();ctx.rect(0,0,PW,tph);ctx.clip();drawImg(ti,0,0,PW,tph,tp);ctx.restore();
+      ctx.save();ctx.beginPath();ctx.rect(0,tph+bannerH,PW,rem-tph);ctx.clip();drawImg(bi,0,tph+bannerH,PW,rem-tph,bp);ctx.restore();
+      drawBanner(PW/2,tph,false);drawUrl(PH-80,false);
+    }
   } else if(layout==="top"){
-    drawBanner(PW/2,0);
-    ctx.save();ctx.beginPath();ctx.rect(0,bannerH,PW,PH-bannerH-80);ctx.clip();drawImg(ti,0,bannerH,PW,PH-bannerH-80,tp);ctx.restore();
-    drawUrl(PH-80,true);
+    if(bandOpacity<100){
+      ctx.save();ctx.beginPath();ctx.rect(0,0,PW,PH);ctx.clip();drawImg(ti,0,0,PW,PH,tp);ctx.restore();
+      drawBanner(PW/2,0,true);drawUrl(PH-80,true);
+    } else {
+      drawBanner(PW/2,0,false);
+      ctx.save();ctx.beginPath();ctx.rect(0,bannerH,PW,PH-bannerH-80);ctx.clip();drawImg(ti,0,bannerH,PW,PH-bannerH-80,tp);ctx.restore();
+      drawUrl(PH-80,true);
+    }
   } else if(layout==="one"){
     ctx.save();ctx.beginPath();ctx.rect(0,0,PW,PH);ctx.clip();drawImg(ti,0,0,PW,PH,tp);ctx.restore();
-    ctx.fillStyle="rgba(0,0,0,.36)";ctx.fillRect(0,0,PW,PH);
-    drawBanner(PW/2,Math.round((PH-bannerH)/2));drawUrl(PH-80,true);
+    if(bandOpacity>=100){ctx.fillStyle="rgba(0,0,0,.30)";ctx.fillRect(0,0,PW,PH);}
+    drawBanner(PW/2,Math.round((PH-bannerH)/2),bandOpacity<100);drawUrl(PH-80,true);
   } else {
-    const ph=PH-bannerH-80;
-    ctx.save();ctx.beginPath();ctx.rect(0,0,PW,ph);ctx.clip();drawImg(ti,0,0,PW,ph,tp);ctx.restore();
-    drawBanner(PW/2,ph);drawUrl(PH-80,false);
+    if(bandOpacity<100){
+      ctx.save();ctx.beginPath();ctx.rect(0,0,PW,PH);ctx.clip();drawImg(ti,0,0,PW,PH,tp);ctx.restore();
+      drawBanner(PW/2,PH-bannerH-80,true);drawUrl(PH-80,true);
+    } else {
+      const ph=PH-bannerH-80;
+      ctx.save();ctx.beginPath();ctx.rect(0,0,PW,ph);ctx.clip();drawImg(ti,0,0,PW,ph,tp);ctx.restore();
+      drawBanner(PW/2,ph,false);drawUrl(PH-80,false);
+    }
   }
   ctx.restore();
 }
@@ -157,16 +198,21 @@ function parseCSV(text){
 async function loadImg(src){return new Promise(res=>{const img=new Image();img.crossOrigin="anonymous";img.onload=()=>res(img);img.onerror=()=>res(null);img.src=src;});}
 
 const PROXIES=[
-  u=>`https://corsproxy.io/?url=${encodeURIComponent(u)}`,
-  u=>`https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-  u=>`https://api.codetabs.com/v1/proxy/?quest=${u}`,
-  u=>`https://thingproxy.freeboard.io/fetch/${u}`,
+  {url:u=>`https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,json:false},
+  {url:u=>`https://corsproxy.io/?url=${encodeURIComponent(u)}`,json:false},
+  {url:u=>`https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(u)}`,json:false},
+  {url:u=>`https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,json:true},
+  {url:u=>`https://thingproxy.freeboard.io/fetch/${u}`,json:false},
 ];
 async function fetchViaProxy(t){
   let last="";
-  for(const make of PROXIES){
-    try{const r=await fetch(make(t));if(!r.ok){last="HTTP "+r.status;continue;}const x=await r.text();if(x&&x.length>30)return x;last="Empty";}
-    catch(e){last=e.message;}
+  for(const p of PROXIES){
+    try{
+      const r=await fetch(p.url(t));
+      if(!r.ok){last="HTTP "+r.status;continue;}
+      if(p.json){const j=await r.json();const x=j.contents||"";if(x&&x.length>30)return x;last="Empty(json)";continue;}
+      const x=await r.text();if(x&&x.length>30)return x;last="Empty";
+    }catch(e){last=e.message;}
   }
   throw new Error(last||"All proxies failed");
 }
@@ -295,6 +341,8 @@ function TemplatePanel({tmpl,setTmpl,localFontStack,setLocalFontStack}){
       <RangeRow label="Width" min={40} max={100} value={tmpl.bannerW} onChange={v=>set("bannerW",v)} fmt={v=>v+"%"}/>
       {tmpl.bannerW<100&&<RangeRow label="Corner radius" min={0} max={80} step={2} value={tmpl.bannerR} onChange={v=>set("bannerR",v)} fmt={v=>v+"px"}/>}
       <RangeRow label="Min top padding" min={10} max={150} step={4} value={tmpl.bannerPad} onChange={v=>set("bannerPad",v)} fmt={v=>v+"px"}/>
+      <RangeRow label="Banner opacity" min={0} max={100} step={5} value={tmpl.bandOpacity===undefined?100:tmpl.bandOpacity} onChange={v=>set("bandOpacity",v)} fmt={v=>v+"%"}/>
+      <div style={{fontSize:11,color:"#999"}}>Lower opacity makes the banner see-through so the photos behind show (no blank gap). Text gets a shadow for readability.</div>
     </div>
 
     <div style={S.secHead}>Font Size</div>
@@ -329,18 +377,28 @@ function ImagePosControl({label,pos,onChange,onUpload,hasImg,fileName}){
   </div>);
 }
 
-function PinStyleOverride({pin,onUpdate}){
+function PinStyleOverride({pin,onUpdate,tmpl}){
   const ov=pin.override||{};
   function setOv(k,v){onUpdate({...pin,override:{...ov,[k]:v}});}
   function setOvClr(k,v){onUpdate({...pin,override:{...ov,colors:{...(ov.colors||{}),[k]:v}}});}
   function clearOv(){onUpdate({...pin,override:undefined});}
+  function lockTemplate(){
+    // snapshot the ENTIRE current template into this pin so later template changes won't affect it
+    onUpdate({...pin,override:{
+      layout:tmpl.layout, fontScale:tmpl.fontScale, fontStack:tmpl.fontStack, fontWeight:tmpl.fontWeight,
+      fontStyle:tmpl.fontStyle, uppercase:tmpl.uppercase, bannerH:tmpl.bannerH, bannerW:tmpl.bannerW,
+      bannerR:tmpl.bannerR, bannerPad:tmpl.bannerPad, bandOpacity:tmpl.bandOpacity,
+      colors:{band:tmpl.colors.band,title:tmpl.colors.title,label:tmpl.colors.label,subtitle:tmpl.colors.subtitle}
+    }});
+  }
   const hasOv=pin.override&&Object.keys(pin.override).length>0;
   return(<div style={{background:"#FFF8F2",border:"0.5px solid #f0d8c8",borderRadius:8,padding:12,display:"flex",flexDirection:"column",gap:9,marginTop:4}}>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
       <span style={{fontSize:11,fontWeight:700,color:"#993C1D",textTransform:"uppercase",letterSpacing:".06em"}}>This pin's custom style</span>
       {hasOv&&<button onClick={clearOv} style={{fontSize:11,color:"#993C1D",background:"none",border:"none",cursor:"pointer",textDecoration:"underline"}}>Reset to template</button>}
     </div>
-    <div style={{fontSize:11,color:"#aa6a4a"}}>Leave blank to use the template. Override only what this pin needs.</div>
+    <button onClick={lockTemplate} style={{...S.btnGhost,fontSize:12,background:"#fff",borderColor:"#D85A30",color:"#D85A30",fontWeight:700}}>📌 Lock current template into this pin only</button>
+    <div style={{fontSize:11,color:"#aa6a4a"}}>Tip: pick a Ready Template in the sidebar, then click the button above to freeze it onto THIS pin. Other pins stay untouched. Or override single options below.</div>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
       <div style={S.fg}><span style={S.lbl}>Banner color</span><ColorPicker value={ov.colors?.band||""} onChange={v=>setOvClr("band",v)}/></div>
       <div style={S.fg}><span style={S.lbl}>Headline color</span><ColorPicker value={ov.colors?.title||""} onChange={v=>setOvClr("title",v)}/></div>
@@ -361,7 +419,18 @@ function PinStyleOverride({pin,onUpdate}){
 
 function effectiveTmpl(tmpl,pin){
   const ov=pin.override;if(!ov)return tmpl;
-  return {...tmpl,...(ov.layout?{layout:ov.layout}:{}),...(ov.fontScale?{fontScale:ov.fontScale}:{}),
+  return {...tmpl,
+    ...(ov.layout?{layout:ov.layout}:{}),
+    ...(ov.fontScale?{fontScale:ov.fontScale}:{}),
+    ...(ov.fontStack?{fontStack:ov.fontStack}:{}),
+    ...(ov.fontWeight?{fontWeight:ov.fontWeight}:{}),
+    ...(ov.fontStyle?{fontStyle:ov.fontStyle}:{}),
+    ...(ov.uppercase!==undefined?{uppercase:ov.uppercase}:{}),
+    ...(ov.bannerH?{bannerH:ov.bannerH}:{}),
+    ...(ov.bannerW?{bannerW:ov.bannerW}:{}),
+    ...(ov.bannerR!==undefined?{bannerR:ov.bannerR}:{}),
+    ...(ov.bannerPad?{bannerPad:ov.bannerPad}:{}),
+    ...(ov.bandOpacity!==undefined?{bandOpacity:ov.bandOpacity}:{}),
     colors:{band:ov.colors?.band||tmpl.colors.band,title:ov.colors?.title||tmpl.colors.title,label:ov.colors?.label||tmpl.colors.label,subtitle:ov.colors?.subtitle||tmpl.colors.subtitle}};
 }
 
@@ -384,16 +453,34 @@ function PinRow({pin,idx,total,tmpl,imgCache,onUpdate,onDownload,onUploadImg,sel
         <ImagePosControl label="Top image" pos={pin.topPos} hasImg={!!pin.topImg} fileName={pin.topImg?(pin.topImg.startsWith("blob:")?"✓ Uploaded":pin.topImg.slice(0,34)+"…"):""} onChange={p=>onUpdate({...pin,topPos:p})} onUpload={e=>onUploadImg(e,"topImg")}/>
         {eff.layout==="two"&&<ImagePosControl label="Bottom image" pos={pin.botPos} hasImg={!!pin.botImg} fileName={pin.botImg?(pin.botImg.startsWith("blob:")?"✓ Uploaded":pin.botImg.slice(0,34)+"…"):""} onChange={p=>onUpdate({...pin,botPos:p})} onUpload={e=>onUploadImg(e,"botImg")}/>}
       </div>
-      {selected?<PinStyleOverride pin={pin} onUpdate={onUpdate}/>:<div style={{fontSize:11,color:"#bbb",fontStyle:"italic"}}>Click this card to edit its custom colors & layout →</div>}
+      {selected?<PinStyleOverride pin={pin} onUpdate={onUpdate} tmpl={tmpl}/>:<div style={{fontSize:11,color:"#bbb",fontStyle:"italic"}}>Click this card to edit its custom colors & layout →</div>}
     </div>
   </div>);
 }
 
 function pinToBlob(tmpl,pin,imgCache){return new Promise(res=>{const cv=document.createElement("canvas");cv.width=PW;cv.height=PH;document.fonts.ready.then(()=>{renderPin(cv,effectiveTmpl(tmpl,pin),pin,imgCache);cv.toBlob(b=>res(b),"image/png",1);});});}
 function downloadPin(tmpl,pin,imgCache){const cv=document.createElement("canvas");cv.width=PW;cv.height=PH;document.fonts.ready.then(()=>{renderPin(cv,effectiveTmpl(tmpl,pin),pin,imgCache);const a=document.createElement("a");a.download=`pin-${(pin.title||"pin").slice(0,30).replace(/\s+/g,"-")}.png`;a.href=cv.toDataURL("image/png",1);a.click();});}
+function pinFileName(pin,i){return `${String(i+1).padStart(2,"0")}-${(pin.title||"pin").slice(0,30).replace(/[^a-z0-9]+/gi,"-")}.png`;}
+function csvCell(v){v=(v==null?"":String(v));return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}
+function buildPinterestCSV(pins){
+  // Pinterest bulk-create CSV columns: Title, Media URL, Pinterest board, Description, Link, Publish date, Keywords
+  const header=["Title","Media URL","Pinterest board","Description","Link","Publish date","Keywords"];
+  const rows=pins.map((p,i)=>[
+    p.title||"", pinFileName(p,i), "", p.subtitle||"",
+    p.url? (p.url.startsWith("http")?p.url:"https://"+p.url) : "", "", p.label||""
+  ].map(csvCell).join(","));
+  return header.join(",")+"\n"+rows.join("\n");
+}
+function downloadPinterestCSV(pins){
+  const csv=buildPinterestCSV(pins);
+  const a=document.createElement("a");a.download="pinterest-schedule.csv";
+  a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv);a.click();
+}
 async function downloadAllZip(tmpl,pins,imgCache,setProgress){
   const zip=new JSZip();
-  for(let i=0;i<pins.length;i++){setProgress(`Rendering ${i+1} of ${pins.length}…`);const blob=await pinToBlob(tmpl,pins[i],imgCache);const nm=`${String(i+1).padStart(2,"0")}-${(pins[i].title||"pin").slice(0,30).replace(/[^a-z0-9]+/gi,"-")}.png`;zip.file(nm,blob);}
+  for(let i=0;i<pins.length;i++){setProgress(`Rendering ${i+1} of ${pins.length}…`);const blob=await pinToBlob(tmpl,pins[i],imgCache);zip.file(pinFileName(pins[i],i),blob);}
+  // include a Pinterest scheduling CSV whose "Media URL" matches the image filenames
+  zip.file("pinterest-schedule.csv", buildPinterestCSV(pins));
   setProgress("Zipping…");
   const content=await zip.generateAsync({type:"blob"});
   const a=document.createElement("a");a.download="pinterest-pins.zip";a.href=URL.createObjectURL(content);a.click();setProgress("");
@@ -451,6 +538,7 @@ function CSVTab({tmpl,imgCache,setImgCache}){
         <div style={{display:"flex",gap:10,alignItems:"center"}}>
           {progress&&<span style={{fontSize:12,color:"#185FA5",fontWeight:600}}>{progress}</span>}
           <button onClick={()=>downloadAllZip(tmpl,pins,imgCache,setProgress)} style={{...S.btn,background:"#2C3E2D"}}>⬇ Download all (ZIP)</button>
+          <button onClick={()=>downloadPinterestCSV(pins)} style={{...S.btn,background:"#185FA5"}} title="CSV with titles, descriptions, links & image names — for Pinterest bulk scheduling">⬇ Pinterest CSV</button>
           <button onClick={()=>setMapped(false)} style={{fontSize:12,color:"#185FA5",background:"none",border:"none",cursor:"pointer"}}>← Re-map</button>
         </div>
       </div>
@@ -515,6 +603,7 @@ function SitemapTab({tmpl,imgCache,setImgCache}){
         <div style={{display:"flex",gap:10,alignItems:"center"}}>
           {progress&&<span style={{fontSize:12,color:"#185FA5",fontWeight:600}}>{progress}</span>}
           <button onClick={()=>downloadAllZip(tmpl,pins,imgCache,setProgress)} style={{...S.btn,background:"#2C3E2D"}}>⬇ Download all (ZIP)</button>
+          <button onClick={()=>downloadPinterestCSV(pins)} style={{...S.btn,background:"#185FA5"}} title="CSV with titles, descriptions, links & image names — for Pinterest bulk scheduling">⬇ Pinterest CSV</button>
         </div>
       </div>
       {pins.map((pin,i)=><PinRow key={i} pin={pin} idx={i} total={pins.length} tmpl={tmpl} imgCache={imgCache} selected={sel===i} onSelect={()=>setSel(i)} onUpdate={p=>setPins(ps=>ps.map((x,j)=>j===i?p:x))} onDownload={()=>downloadPin(tmpl,pin,imgCache)} onUploadImg={(e,slot)=>handleUpImg(i,e,slot)}/>)}
